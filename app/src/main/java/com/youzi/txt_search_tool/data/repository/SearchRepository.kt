@@ -17,12 +17,14 @@ class SearchRepository {
      * @param content 文件内容流
      * @param query 搜索关键字
      * @param contextSize 上下文字符数（默认3个字符）
+     * @param ignoredTexts 已忽略的搜索结果文本集合
      * @return Flow<SearchResult> 搜索结果流（已合并相同结果）
      */
     fun searchWithContext(
         content: Flow<String>,
         query: String,
-        contextSize: Int = 3
+        contextSize: Int = 3,
+        ignoredTexts: Set<String> = emptySet()
     ): Flow<SearchResult> = flow {
         if (query.isEmpty()) return@flow
 
@@ -50,6 +52,12 @@ class SearchRepository {
                 val startPos = maxOf(0, matchIndex - contextSize)
                 val endPos = minOf(line.length, matchIndex + query.length + contextSize)
                 val displayText = line.substring(startPos, endPos)
+
+                // 如果displayText在忽略列表中，跳过此结果
+                if (ignoredTexts.contains(displayText)) {
+                    searchIndex = matchIndex + query.length
+                    continue
+                }
 
                 // 获取前一行和后一行
                 val previousLine = if (index > 0) allLines[index - 1] else ""

@@ -1,10 +1,12 @@
 package com.youzi.txt_search_tool.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -12,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -46,6 +49,10 @@ fun SearchResultsScreen(
     val fileName by viewModel.fileName.collectAsState()
     val ignoredResults by viewModel.ignoredResults.collectAsState()
     val successMessage by viewModel.successMessage.collectAsState()
+    val quickPhrases by viewModel.quickPhrases.collectAsState()
+    
+    var showQuickPhraseDialog by remember { mutableStateOf(false) }
+    var newQuickPhrase by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -62,6 +69,16 @@ fun SearchResultsScreen(
                             imageVector = Icons.Default.ArrowBack,
                             contentDescription = "返回",
                             tint = NeumorphicText
+                        )
+                    }
+                },
+                actions = {
+                    // 快捷字段按钮
+                    IconButton(onClick = { showQuickPhraseDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "快捷字段",
+                            tint = NeumorphicPrimary
                         )
                     }
                 },
@@ -168,11 +185,15 @@ fun SearchResultsScreen(
                             SearchResultItem(
                                 result = result,
                                 searchQuery = searchQuery,
+                                quickPhrases = quickPhrases,
                                 onReplace = { replaceText ->
                                     viewModel.replaceSingleResult(result, replaceText)
                                 },
                                 onIgnore = {
-                                    viewModel.ignoreResult(result.lineNumbers)
+                                    viewModel.ignoreResult(result.lineNumbers, result.displayText)
+                                },
+                                onAddQuickPhrase = { phrase ->
+                                    viewModel.addQuickPhrase(phrase)
                                 }
                             )
                             Spacer(modifier = Modifier.height(8.dp))
@@ -181,6 +202,20 @@ fun SearchResultsScreen(
                 }
             }
         }
+        
+        // 快捷字段管理弹窗
+        if (showQuickPhraseDialog) {
+            QuickPhraseDialog(
+                quickPhrases = quickPhrases,
+                onDismiss = { showQuickPhraseDialog = false },
+                onAddPhrase = { phrase ->
+                    viewModel.addQuickPhrase(phrase)
+                },
+                onRemovePhrase = { phrase ->
+                    viewModel.removeQuickPhrase(phrase)
+                }
+            )
+        }
     }
 }
 
@@ -188,19 +223,24 @@ fun SearchResultsScreen(
  * 搜索结果项组件
  * @param result 搜索结果
  * @param searchQuery 搜索关键字
+ * @param quickPhrases 快捷字段列表
  * @param onReplace 替换回调
  * @param onIgnore 忽略回调
+ * @param onAddQuickPhrase 添加快捷字段回调
  */
 @Composable
 fun SearchResultItem(
     result: SearchResult,
     searchQuery: String,
+    quickPhrases: List<String>,
     onReplace: (String) -> Unit,
-    onIgnore: () -> Unit
+    onIgnore: () -> Unit,
+    onAddQuickPhrase: (String) -> Unit
 ) {
     var showDetailDialog by remember { mutableStateOf(false) }
     // 使用 result 的唯一标识作为 key，确保每个结果项都有独立的输入框状态
     var replaceText by remember(result.primaryLineNumber, result.lineNumbers) { mutableStateOf("") }
+    var showQuickPhraseMenu by remember { mutableStateOf(false) }
 
     NeumorphicCard(
         modifier = Modifier.fillMaxWidth()
@@ -251,6 +291,33 @@ fun SearchResultItem(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // 快捷字段横向滚动列表
+            if (quickPhrases.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(quickPhrases.size) { index ->
+                        val phrase = quickPhrases[index]
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = NeumorphicPrimary.copy(alpha = 0.1f),
+                            modifier = Modifier.clickable {
+                                replaceText = phrase
+                            }
+                        ) {
+                            Text(
+                                text = phrase,
+                                fontSize = 12.sp,
+                                color = NeumorphicPrimary,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             // 替换输入框
             OutlinedTextField(
                 value = replaceText,
@@ -294,7 +361,28 @@ fun SearchResultItem(
                     border = BorderStroke(1.dp, NeumorphicPrimary.copy(alpha = 0.5f))
                 ) {
                     Text(
-                        text = "段落详情",
+                        text = "详情",
+                        fontSize = 13.sp
+                    )
+                }
+
+                // 添加到快捷字段按钮
+                OutlinedButton(
+                    onClick = { 
+                        if (replaceText.isNotBlank()) {
+                            onAddQuickPhrase(replaceText)
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = NeumorphicPrimary
+                    ),
+                    border = BorderStroke(1.dp, NeumorphicPrimary.copy(alpha = 0.5f)),
+                    enabled = replaceText.isNotBlank()
+                ) {
+                    Text(
+                        text = "添加",
                         fontSize = 13.sp
                     )
                 }
@@ -578,5 +666,236 @@ fun buildHighlightedText(text: String, searchQuery: String) = buildAnnotatedStri
     // 添加剩余文本
     if (startIndex < text.length) {
         append(text.substring(startIndex))
+    }
+}
+
+/**
+ * 快捷字段管理弹窗
+ * @param quickPhrases 快捷字段列表
+ * @param onDismiss 关闭回调
+ * @param onAddPhrase 添加快捷字段回调
+ * @param onRemovePhrase 删除快捷字段回调
+ */
+@Composable
+fun QuickPhraseDialog(
+    quickPhrases: List<String>,
+    onDismiss: () -> Unit,
+    onAddPhrase: (String) -> Unit,
+    onRemovePhrase: (String) -> Unit
+) {
+    var newPhrase by remember { mutableStateOf("") }
+    
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        NeumorphicCard(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .fillMaxHeight(0.7f)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // 标题栏 - 使用渐变背景和更现代的设计
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = NeumorphicPrimary.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // 装饰性图标
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = NeumorphicPrimary.copy(alpha = 0.15f),
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = null,
+                                        tint = NeumorphicPrimary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                            
+                            Column {
+                                Text(
+                                    text = "快捷字段管理",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeumorphicText
+                                )
+                                Text(
+                                    text = "管理常用替换内容",
+                                    fontSize = 12.sp,
+                                    color = NeumorphicTextSecondary.copy(alpha = 0.7f)
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = NeumorphicSurface,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            IconButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "关闭",
+                                    tint = NeumorphicTextSecondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(bottom = 16.dp),
+                    color = NeumorphicDark.copy(alpha = 0.3f)
+                )
+
+                // 添加新快捷字段输入框
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = newPhrase,
+                        onValueChange = { newPhrase = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = {
+                            Text(
+                                text = "输入新快捷字段",
+                                color = NeumorphicTextSecondary.copy(alpha = 0.6f),
+                                fontSize = 14.sp
+                            )
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = NeumorphicSurface,
+                            unfocusedContainerColor = NeumorphicSurface,
+                            focusedBorderColor = NeumorphicPrimary,
+                            unfocusedBorderColor = NeumorphicDark.copy(alpha = 0.3f),
+                            focusedTextColor = NeumorphicText,
+                            unfocusedTextColor = NeumorphicText
+                        ),
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp)
+                    )
+                    
+                    Button(
+                        onClick = {
+                            if (newPhrase.isNotBlank()) {
+                                onAddPhrase(newPhrase)
+                                newPhrase = ""
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NeumorphicPrimary,
+                            contentColor = NeumorphicLight
+                        ),
+                        enabled = newPhrase.isNotBlank()
+                    ) {
+                        Text(text = "添加", fontSize = 14.sp)
+                    }
+                }
+
+                // 快捷字段列表
+                if (quickPhrases.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "暂无快捷字段",
+                            fontSize = 14.sp,
+                            color = NeumorphicTextSecondary
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(quickPhrases.size) { index ->
+                            val phrase = quickPhrases[index]
+                            QuickPhraseItem(
+                                phrase = phrase,
+                                onRemove = { onRemovePhrase(phrase) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 快捷字段项
+ * @param phrase 快捷字段内容
+ * @param onRemove 删除回调
+ */
+@Composable
+fun QuickPhraseItem(
+    phrase: String,
+    onRemove: () -> Unit
+) {
+    NeumorphicCard(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = phrase,
+                fontSize = 14.sp,
+                color = NeumorphicText,
+                modifier = Modifier.weight(1f)
+            )
+            
+            IconButton(
+                onClick = onRemove,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "删除",
+                    tint = NeumorphicTextSecondary.copy(alpha = 0.7f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
     }
 }

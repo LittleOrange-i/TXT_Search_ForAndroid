@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.youzi.txt_search_tool.data.model.ReplaceHistory
 import com.youzi.txt_search_tool.data.model.SearchResult
 import com.youzi.txt_search_tool.data.repository.FileRepository
+import com.youzi.txt_search_tool.data.repository.PreferencesRepository
 import com.youzi.txt_search_tool.data.repository.SearchRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +24,7 @@ class MainViewModel(context: Context) : ViewModel() {
 
     private val fileRepository = FileRepository(context)
     private val searchRepository = SearchRepository()
+    private val preferencesRepository = PreferencesRepository(context)
 
     // 当前选择的文件URI
     private val _fileUri = MutableStateFlow<Uri?>(null)
@@ -51,6 +53,14 @@ class MainViewModel(context: Context) : ViewModel() {
     // 已忽略的搜索结果索引集合
     private val _ignoredResults = MutableStateFlow<Set<Int>>(emptySet())
     val ignoredResults: StateFlow<Set<Int>> = _ignoredResults.asStateFlow()
+
+    // 已忽略的搜索结果内容集合（前3位+关键字+后3位），用于持久化过滤
+    private val _ignoredResultTexts = MutableStateFlow<Set<String>>(emptySet())
+    val ignoredResultTexts: StateFlow<Set<String>> = _ignoredResultTexts.asStateFlow()
+
+    // 快捷字段列表
+    private val _quickPhrases = MutableStateFlow<List<String>>(emptyList())
+    val quickPhrases: StateFlow<List<String>> = _quickPhrases.asStateFlow()
 
     // 搜索进度 (0.0 - 1.0)
     private val _searchProgress = MutableStateFlow(0f)
@@ -87,17 +97,55 @@ class MainViewModel(context: Context) : ViewModel() {
     // 搜索任务
     private var searchJob: Job? = null
 
+    // 初始化时加载快捷字段和上次打开的文件
+    init {
+        viewModelScope.launch {
+            try {
+                // 加载快捷字段
+                val savedPhrases = preferencesRepository.loadQuickPhrases()
+                _quickPhrases.value = savedPhrases
+                
+                // 加载上次打开的文件URI
+                val lastFileUriString = preferencesRepository.loadLastFileUri()
+                if (lastFileUriString != null) {
+                    try {
+                        val uri = Uri.parse(lastFileUriString)
+                        _fileUri.value = uri
+                        _fileName.value = fileRepository.getFileName(uri)
+                        _fileSize.value = fileRepository.getFileSize(uri)
+                    } catch (e: Exception) {
+                        // 如果加载失败（文件可能已删除），清除保存的URI
+                        preferencesRepository.clearLastFileUri()
+                    }
+                }
+            } catch (e: Exception) {
+                // 加载失败时忽略错误，使用空列表
+            }
+        }
+    }
+
     /**
      * 设置文件URI
      * @param uri 文件URI
      */
     fun setFileUri(uri: Uri) {
         _fileUri.value = uri
+        // 选择新文件时，重置所有状态
+        _ignoredResults.value = emptySet()
+        _ignoredResultTexts.value = emptySet()
+        _currentContent.value = ""
+        _hasUnsavedReplacements.value = false
+        _searchResults.value = emptyList()
+        _replaceHistory.value = emptyList()
+        
         viewModelScope.launch {
             try {
                 _fileName.value = fileRepository.getFileName(uri)
                 _fileSize.value = fileRepository.getFileSize(uri)
                 _errorMessage.value = null
+                
+                // 保存文件URI到持久化存储
+                preferencesRepository.saveLastFileUri(uri.toString())
             } catch (e: Exception) {
                 _errorMessage.value = "无法读取文件信息: ${e.message}"
             }
@@ -162,7 +210,8 @@ class MainViewModel(context: Context) : ViewModel() {
                 searchRepository.searchWithContext(
                     content = searchContent,
                     query = query,
-                    contextSize = 2
+                    contextSize = 2,
+                    ignoredTexts = _ignoredResultTexts.value // 传入已忽略的内容
                 ).collect { result ->
                     // 添加搜索结果
                     _searchResults.value = _searchResults.value + result
@@ -287,20 +336,59 @@ class MainViewModel(context: Context) : ViewModel() {
     }
 
     /**
-     * 清空搜索结果
+     * 清空搜索结果（但保留忽略的结果内容）
      */
     fun clearSearchResults() {
         _searchResults.value = emptyList()
         _searchProgress.value = 0f
         _ignoredResults.value = emptySet()
+        // 注意：不清空 _ignoredResultTexts，以便在重新搜索时继续过滤已忽略的内容
     }
 
     /**
      * 忽略某个搜索结果（忽略所有匹配的行）
      * @param lineNumbers 行号列表
+     * @param displayText 显示文本（前3位+关键字+后3位）
      */
-    fun ignoreResult(lineNumbers: List<Int>) {
+    fun ignoreResult(lineNumbers: List<Int>, displayText: String) {
         _ignoredResults.value = _ignoredResults.value + lineNumbers.toSet()
+        _ignoredResultTexts.value = _ignoredResultTexts.value + displayText
+    }
+
+    /**
+     * 添加快捷字段
+     * @param phrase 快捷字段内容
+     */
+    fun addQuickPhrase(phrase: String) {
+        if (phrase.isNotBlank() && !_quickPhrases.value.contains(phrase)) {
+            _quickPhrases.value = _quickPhrases.value + phrase
+            // 自动保存到手机存储
+            saveQuickPhrases()
+        }
+    }
+
+    /**
+     * 删除快捷字段
+     * @param phrase 快捷字段内容
+     */
+    fun removeQuickPhrase(phrase: String) {
+        _quickPhrases.value = _quickPhrases.value.filter { it != phrase }
+        // 自动保存到手机存储
+        saveQuickPhrases()
+    }
+
+    /**
+     * 保存快捷字段到手机存储
+     */
+    private fun saveQuickPhrases() {
+        viewModelScope.launch {
+            try {
+                preferencesRepository.saveQuickPhrases(_quickPhrases.value)
+            } catch (e: Exception) {
+                // 保存失败时记录错误但不影响用户操作
+                _errorMessage.value = "保存快捷字段失败: ${e.message}"
+            }
+        }
     }
 
     /**
