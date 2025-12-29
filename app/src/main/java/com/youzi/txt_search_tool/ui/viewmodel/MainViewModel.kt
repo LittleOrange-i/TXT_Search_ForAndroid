@@ -80,6 +80,10 @@ class MainViewModel(context: Context) : ViewModel() {
     private val _currentContent = MutableStateFlow("")
     val currentContent: StateFlow<String> = _currentContent.asStateFlow()
 
+    // 是否有未保存的替换操作
+    private val _hasUnsavedReplacements = MutableStateFlow(false)
+    val hasUnsavedReplacements: StateFlow<Boolean> = _hasUnsavedReplacements.asStateFlow()
+
     // 搜索任务
     private var searchJob: Job? = null
 
@@ -243,6 +247,9 @@ class MainViewModel(context: Context) : ViewModel() {
                 // 更新内存中的内容，不写入文件
                 _currentContent.value = resultLines.joinToString("\n")
 
+                // 标记有未保存的替换操作
+                _hasUnsavedReplacements.value = true
+
                 // 添加到历史记录
                 val history = ReplaceHistory(
                     searchQuery = query,
@@ -345,6 +352,9 @@ class MainViewModel(context: Context) : ViewModel() {
                 // 更新内存中的内容，不写入文件
                 _currentContent.value = allLines.joinToString("\n")
 
+                // 标记有未保存的替换操作
+                _hasUnsavedReplacements.value = true
+
                 // 从搜索结果中移除这些项
                 _searchResults.value = _searchResults.value.filter { 
                     it.lineNumbers.none { lineNumber -> result.lineNumbers.contains(lineNumber) }
@@ -401,6 +411,8 @@ class MainViewModel(context: Context) : ViewModel() {
                 _errorMessage.value = null
                 fileRepository.writeFile(uri, content)
                 _successMessage.value = "保存成功"
+                // 保存成功后清除未保存标记
+                _hasUnsavedReplacements.value = false
             } catch (e: Exception) {
                 _errorMessage.value = "保存失败: ${e.message}"
             }
@@ -423,6 +435,8 @@ class MainViewModel(context: Context) : ViewModel() {
                 _errorMessage.value = null
                 fileRepository.writeFile(targetUri, content)
                 _successMessage.value = "另存为成功"
+                // 另存为成功后清除未保存标记
+                _hasUnsavedReplacements.value = false
             } catch (e: Exception) {
                 _errorMessage.value = "另存为失败: ${e.message}"
             }
@@ -435,5 +449,14 @@ class MainViewModel(context: Context) : ViewModel() {
      */
     fun updateCurrentContent(content: String) {
         _currentContent.value = content
+    }
+
+    /**
+     * 丢弃未保存的替换操作
+     */
+    fun discardUnsavedReplacements() {
+        _hasUnsavedReplacements.value = false
+        _currentContent.value = ""
+        _replaceHistory.value = emptyList()
     }
 }
