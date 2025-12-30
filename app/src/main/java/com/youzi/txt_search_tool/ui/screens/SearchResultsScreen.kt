@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -53,6 +54,7 @@ fun SearchResultsScreen(
     
     var showQuickPhraseDialog by remember { mutableStateOf(false) }
     var newQuickPhrase by remember { mutableStateOf("") }
+    var showBatchIgnoreDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -73,6 +75,14 @@ fun SearchResultsScreen(
                     }
                 },
                 actions = {
+                    // 二次过滤搜索按钮
+                    IconButton(onClick = { showBatchIgnoreDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "批量忽略",
+                            tint = NeumorphicPrimary
+                        )
+                    }
                     // 快捷字段按钮
                     IconButton(onClick = { showQuickPhraseDialog = true }) {
                         Icon(
@@ -213,6 +223,24 @@ fun SearchResultsScreen(
                 },
                 onRemovePhrase = { phrase ->
                     viewModel.removeQuickPhrase(phrase)
+                }
+            )
+        }
+        
+        // 批量忽略弹窗
+        if (showBatchIgnoreDialog) {
+            BatchIgnoreDialog(
+                searchResults = searchResults,
+                ignoredResults = ignoredResults,
+                onDismiss = { showBatchIgnoreDialog = false },
+                onBatchIgnore = { keyword ->
+                    // 遍历所有搜索结果，找出包含关键字的结果并批量忽略
+                    searchResults.forEach { result ->
+                        if (result.displayText.contains(keyword, ignoreCase = true) &&
+                            !result.lineNumbers.any { ignoredResults.contains(it) }) {
+                            viewModel.ignoreResult(result.lineNumbers, result.displayText)
+                        }
+                    }
                 }
             )
         }
@@ -591,6 +619,7 @@ fun ParagraphContextItem(
     }
 }
 
+
 /**
  * 行区域组件
  * @param title 标题
@@ -895,6 +924,182 @@ fun QuickPhraseItem(
                     tint = NeumorphicTextSecondary.copy(alpha = 0.7f),
                     modifier = Modifier.size(18.dp)
                 )
+            }
+        }
+    }
+}
+
+/**
+ * 批量忽略弹窗
+ * @param searchResults 搜索结果列表
+ * @param ignoredResults 已忽略的结果集合
+ * @param onDismiss 关闭回调
+ * @param onBatchIgnore 批量忽略回调
+ */
+@Composable
+fun BatchIgnoreDialog(
+    searchResults: List<SearchResult>,
+    ignoredResults: Set<Int>,
+    onDismiss: () -> Unit,
+    onBatchIgnore: (String) -> Unit
+) {
+    var filterKeyword by remember { mutableStateOf("") }
+    
+    // 计算匹配的结果数量（排除已忽略的）
+    val matchCount = remember(filterKeyword, searchResults, ignoredResults) {
+        if (filterKeyword.isBlank()) {
+            0
+        } else {
+            searchResults.count { result ->
+                result.displayText.contains(filterKeyword, ignoreCase = true) &&
+                !result.lineNumbers.any { ignoredResults.contains(it) }
+            }
+        }
+    }
+    
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        NeumorphicCard(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .wrapContentHeight()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                // 标题
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "批量忽略",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = NeumorphicText
+                        )
+                        Text(
+                            text = "二次过滤搜索结果",
+                            fontSize = 12.sp,
+                            color = NeumorphicTextSecondary.copy(alpha = 0.7f)
+                        )
+                    }
+                    
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "关闭",
+                            tint = NeumorphicTextSecondary
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                HorizontalDivider(
+                    modifier = Modifier.padding(bottom = 16.dp),
+                    color = NeumorphicDark.copy(alpha = 0.3f)
+                )
+                
+                // 说明文字
+                Text(
+                    text = "输入关键字，匹配到的搜索结果将被批量忽略",
+                    fontSize = 13.sp,
+                    color = NeumorphicTextSecondary,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                
+                // 输入框
+                OutlinedTextField(
+                    value = filterKeyword,
+                    onValueChange = { filterKeyword = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = {
+                        Text(
+                            text = "输入过滤关键字",
+                            color = NeumorphicTextSecondary.copy(alpha = 0.6f),
+                            fontSize = 14.sp
+                        )
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = NeumorphicSurface,
+                        unfocusedContainerColor = NeumorphicSurface,
+                        focusedBorderColor = NeumorphicPrimary,
+                        unfocusedBorderColor = NeumorphicDark.copy(alpha = 0.3f),
+                        focusedTextColor = NeumorphicText,
+                        unfocusedTextColor = NeumorphicText
+                    ),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp)
+                )
+                
+                // 匹配数量提示
+                if (filterKeyword.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "将忽略 $matchCount 条匹配结果",
+                        fontSize = 13.sp,
+                        color = if (matchCount > 0) NeumorphicPrimary else NeumorphicTextSecondary,
+                        fontWeight = if (matchCount > 0) FontWeight.Medium else FontWeight.Normal
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(20.dp))
+                
+                // 按钮行
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // 取消按钮
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = NeumorphicTextSecondary
+                        ),
+                        border = BorderStroke(1.dp, NeumorphicDark.copy(alpha = 0.5f))
+                    ) {
+                        Text(
+                            text = "取消",
+                            fontSize = 14.sp
+                        )
+                    }
+                    
+                    // 确认忽略按钮
+                    Button(
+                        onClick = {
+                            if (filterKeyword.isNotBlank() && matchCount > 0) {
+                                onBatchIgnore(filterKeyword)
+                                onDismiss()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NeumorphicPrimary,
+                            contentColor = NeumorphicLight
+                        ),
+                        enabled = filterKeyword.isNotBlank() && matchCount > 0
+                    ) {
+                        Text(
+                            text = "批量忽略",
+                            fontSize = 14.sp
+                        )
+                    }
+                }
             }
         }
     }
